@@ -8,6 +8,8 @@ import base64
 import ldap
 import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import pickle
+from data_file_descriptor import AccessType, DataFileStorage
 
 # -----------------------------------------------------------------------------
 # Requests are processed in separate thread
@@ -29,13 +31,13 @@ class AuthHTTPServer(ThreadingMixIn, HTTPServer):
 #    pass
 # -----------------------------------------------------------------------------
 conf = {}
-return_path = '/2017/2017-03/2017-03-22/118109/4342137.1'
+
 
 
 def read_conf(fname):
     """read file in pam_ldap format"""
     global conf
-    opts = ['host', 'base', 'binddn', 'bindpw', 'ssl']
+    opts = ['host', 'base', 'binddn', 'bindpw', 'ssl', 'filedescrpth']
     try:
         with open(fname) as f:
             for line in f:
@@ -89,7 +91,7 @@ def check_auth(user, passwd, allowusr, allowgr):
                 except ldap.INVALID_CREDENTIALS:
                     return False
                 # check allowed users
-                if bool(allowusr) and user.lower() in [x.lower().strip() for x in allowusr.split(',')]:
+                if bool(allowusr) and str(data['uniqueIdentifier'][0], 'utf-8') in [x.strip() for x in allowusr.split(',')]:
                     return True
                 # check allowed groups
                 if bool(allowgr):
@@ -109,23 +111,41 @@ def check_auth(user, passwd, allowusr, allowgr):
 
 class LDAPAuthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        my_epfl_data = {'/public':'/2017/2017-03/2017-03-22/118109/4342137.1', 'public':'2017/2017-03/2017-03-22/118109/4342137.1'}
         try:
             allowusr = self.headers.get('X-Ldap-Allowed-Usr')
             allowgr = self.headers.get('X-Ldap-Allowed-Grp')
             document_uri = self.headers.get('X-Ldap-Document-Uri')
             auth_header = self.headers.get('Authorization')
-            return_path = my_epfl_data.get(document_uri, '/unknown')
-            print('Document uri : {uri}'.format(uri=document_uri))
+            document_uri = self.headers.get('X-Ldap-Document-Uri')
+            document_uri_alternate = self.path
+            file_path = ''
+            document_mode = False
+            if document_uri in files_descriptor.storage:
+                document_mode = True
+                file_path = files_descriptor.get(document_uri).file_path
+                file_path_alternate = files_descriptor.get(document_uri_alternate).file_path
+                allowusr = ','.join(files_descriptor.get(document_uri).allowed_users)
+                allowgr = ','.join(files_descriptor.get(document_uri).allowed_groups)
+                if files_descriptor.get(document_uri).access_type == AccessType.free:
+                    allowusr = '_anybody'
+                if files_descriptor.get(document_uri).access_type == AccessType.public:
+                    allowusr = ''
+                    allowgr = ''
+                print(file_path, allowusr, allowgr)
+                
             if allowusr == '_anybody':
                 self.send_response(200)
-                self.send_header('X-Return-Path', return_path)
+                if document_mode :
+                    self.send_header('X-File-Path', file_path)
+                    self.send_header('X-File-Path', file_path_alternate)
                 return
             if auth_header and auth_header.lower().startswith('basic '):
                 user, passwd = str(base64.b64decode(auth_header[6:]), 'utf-8').split(':', 1)
                 if check_auth(user, passwd, allowusr, allowgr):
                     self.send_response(200)
-                    self.send_header('X-Return-Path', return_path)
+                    if document_mode:
+                        self.send_header('X-File-Path', file_path)
+                        self.send_header('X-File-Path', file_path_alternate)
                     return
             self.send_response(401)
             realm = self.headers.get('X-Ldap-Realm')
@@ -148,8 +168,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     read_conf(args.config)
+
     drop_privileges()
     signal.signal(signal.SIGINT, exit_handler)
+
+    files_descriptor = DataFileStorage()
+    files_descriptor.load(conf['filedescrpth'])
 
     server = AuthHTTPServer((args.host, args.port), LDAPAuthHandler)
     server.serve_forever()
