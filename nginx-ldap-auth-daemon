@@ -100,7 +100,7 @@ def check_auth(user, passwd, allowusr, allowgr):
                     if bool(groups_set & allowgr_set):
                         return True
                 # user found but not in allowed
-                return False if bool(allowusr) or bool(allowgr) else True
+                return False
         except (ldap.CONNECT_ERROR, ldap.SERVER_DOWN):
             pass  # try next server
         finally:
@@ -117,13 +117,11 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
             document_uri = self.headers.get('X-Ldap-Document-Uri')
             auth_header = self.headers.get('Authorization')
             document_uri = self.headers.get('X-Ldap-Document-Uri')
-            document_uri_alternate = self.path
             file_path = ''
             document_mode = False
             if document_uri in files_descriptor.storage:
                 document_mode = True
                 file_path = files_descriptor.get(document_uri).file_path
-                file_path_alternate = files_descriptor.get(document_uri_alternate).file_path
                 allowusr = ','.join(files_descriptor.get(document_uri).allowed_users)
                 allowgr = ','.join(files_descriptor.get(document_uri).allowed_groups)
                 if files_descriptor.get(document_uri).access_type == AccessType.free:
@@ -131,14 +129,13 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                 if files_descriptor.get(document_uri).access_type == AccessType.public:
                     allowusr = ''
                     allowgr = ''
-                print(document_uri, document_uri_alternate, file_path, allowusr, allowgr, file=errorlog)
+                print(document_uri, file_path, allowusr, allowgr, file=errorlog)
                 errorlog.flush()
                 
             if allowusr == '_anybody':
                 self.send_response(200)
                 if document_mode :
                     self.send_header('X-File-Path', file_path)
-                    self.send_header('X-File-Path-alternate', file_path_alternate)
                 return
             if auth_header and auth_header.lower().startswith('basic '):
                 user, passwd = str(base64.b64decode(auth_header[6:]), 'utf-8').split(':', 1)
@@ -146,7 +143,6 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                     self.send_response(200)
                     if document_mode:
                         self.send_header('X-File-Path', file_path)
-                        self.send_header('X-File-Path-alternate', file_path_alternate)
                     return
             self.send_response(401)
             realm = self.headers.get('X-Ldap-Realm')

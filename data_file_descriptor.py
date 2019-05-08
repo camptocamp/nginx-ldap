@@ -30,7 +30,7 @@ class DataFileStorage():
         self.storage[key] = value
 
     def get(self, key):
-        return self.storage[key]
+        return self.storage.get(key, "")
 
     def save(self, filename):
         with open(filename, 'wb') as f:
