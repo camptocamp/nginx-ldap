@@ -157,7 +157,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
         except:
             self.send_response(500)
             self.send_header('X-Error-Message', sys.exc_info()[1])
-            print(sys.exc_info()[1], file=errorlog)
+            print(sys.exc_info(), file=errorlog)
         finally:
             self.end_headers()
 
