@@ -90,6 +90,9 @@ def check_auth(user, passwd, allowusr, allowgr):
                     ldap_connection.simple_bind_s(dn, passwd)
                 except ldap.INVALID_CREDENTIALS:
                     return False
+                #check if public (allowed to all authenticated users)
+                if allowgr == '_public':
+                    return True
                 # check allowed users
                 if bool(allowusr) and str(data['uniqueIdentifier'][0], 'utf-8') in [x.strip() for x in allowusr.split(',')]:
                     return True
@@ -128,7 +131,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                     allowusr = '_anybody'
                 if files_descriptor.get(document_uri).access_type == AccessType.public:
                     allowusr = ''
-                    allowgr = ''
+                    allowgr = '_public'
                 print(document_uri, file_path, allowusr, allowgr, file=errorlog)
                 errorlog.flush()
                 
