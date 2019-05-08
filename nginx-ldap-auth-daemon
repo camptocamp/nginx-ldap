@@ -37,7 +37,7 @@ conf = {}
 def read_conf(fname):
     """read file in pam_ldap format"""
     global conf
-    opts = ['host', 'base', 'binddn', 'bindpw', 'ssl', 'filedescrpth']
+    opts = ['host', 'base', 'binddn', 'bindpw', 'ssl', 'filedescrpth', 'logdir']
     try:
         with open(fname) as f:
             for line in f:
@@ -131,13 +131,14 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                 if files_descriptor.get(document_uri).access_type == AccessType.public:
                     allowusr = ''
                     allowgr = ''
-                print(file_path, allowusr, allowgr)
+                print(document_uri, document_uri_alternate, file_path, allowusr, allowgr, file=errorlog)
+                errorlog.flush()
                 
             if allowusr == '_anybody':
                 self.send_response(200)
                 if document_mode :
                     self.send_header('X-File-Path', file_path)
-                    self.send_header('X-File-Path', file_path_alternate)
+                    self.send_header('X-File-Path-alternate', file_path_alternate)
                 return
             if auth_header and auth_header.lower().startswith('basic '):
                 user, passwd = str(base64.b64decode(auth_header[6:]), 'utf-8').split(':', 1)
@@ -145,7 +146,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                     self.send_response(200)
                     if document_mode:
                         self.send_header('X-File-Path', file_path)
-                        self.send_header('X-File-Path', file_path_alternate)
+                        self.send_header('X-File-Path-alternate', file_path_alternate)
                     return
             self.send_response(401)
             realm = self.headers.get('X-Ldap-Realm')
@@ -156,6 +157,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
         except:
             self.send_response(500)
             self.send_header('X-Error-Message', sys.exc_info()[1])
+            print(sys.exc_info()[1], file=errorlog)
         finally:
             self.end_headers()
 
@@ -174,6 +176,8 @@ if __name__ == '__main__':
 
     files_descriptor = DataFileStorage()
     files_descriptor.load(conf['filedescrpth'])
+
+    errorlog = open(conf['logdir']+'errorlog.log', 'w', 1)
 
     server = AuthHTTPServer((args.host, args.port), LDAPAuthHandler)
     server.serve_forever()
