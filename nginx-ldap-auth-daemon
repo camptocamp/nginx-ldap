@@ -173,10 +173,13 @@ if __name__ == '__main__':
     drop_privileges()
     signal.signal(signal.SIGINT, exit_handler)
 
-    files_descriptor = DataFileStorage()
-    files_descriptor.load(conf['filedescrpth'])
-
     errorlog = open(conf['logdir']+'errorlog.log', 'w', 1)
 
-    server = AuthHTTPServer((args.host, args.port), LDAPAuthHandler)
-    server.serve_forever()
+    try :
+        files_descriptor = DataFileStorage()
+        files_descriptor.load(conf['filedescrpth'])
+
+        server = AuthHTTPServer((args.host, args.port), LDAPAuthHandler)
+        server.serve_forever()
+    except:
+        print(sys.exc_info(), file=errorlog)
