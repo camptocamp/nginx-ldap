@@ -8,7 +8,6 @@ import base64
 import ldap
 import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import pickle
 from data_file_descriptor import AccessType, DataFileStorage
 
 # -----------------------------------------------------------------------------
@@ -117,7 +116,6 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
         try:
             allowusr = self.headers.get('X-Ldap-Allowed-Usr')
             allowgr = self.headers.get('X-Ldap-Allowed-Grp')
-            document_uri = self.headers.get('X-Ldap-Document-Uri')
             auth_header = self.headers.get('Authorization')
             document_uri = self.headers.get('X-Ldap-Document-Uri')
             file_path = ''
@@ -132,8 +130,6 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                 if files_descriptor.get(document_uri).access_type == AccessType.public:
                     allowusr = ''
                     allowgr = '_public'
-                print(document_uri, file_path, allowusr, allowgr, file=errorlog)
-                errorlog.flush()
                 
             if allowusr == '_anybody':
                 self.send_response(200)
@@ -157,6 +153,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
             self.send_response(500)
             self.send_header('X-Error-Message', sys.exc_info()[1])
             print(sys.exc_info(), file=errorlog)
+            errorlog.flush()
         finally:
             self.end_headers()
 
@@ -173,7 +170,7 @@ if __name__ == '__main__':
     drop_privileges()
     signal.signal(signal.SIGINT, exit_handler)
 
-    errorlog = open(conf['logdir']+'errorlog.log', 'w', 1)
+    errorlog = open(conf['logdir']+'nginx-ldap-auth.log', 'w', 1)
 
     try :
         files_descriptor = DataFileStorage()
@@ -183,3 +180,4 @@ if __name__ == '__main__':
         server.serve_forever()
     except:
         print(sys.exc_info(), file=errorlog)
+        errorlog.flush()
