@@ -164,8 +164,10 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                         #user has no access to document
                         self.send_response(403)
                         return
-                    #the document doesn't exist
-                    self.send_response(404)
+                    #the document doesn't exist, but nginx auth module doesn't support it ...
+                    #so return 200, and an empty path
+                    self.send_response(200)
+                    self.send_header('X-File-Path', "")
                     return
                 #user failed to authenticate
                 self.send_response(401)
