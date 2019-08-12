@@ -9,6 +9,7 @@ import ldap
 import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from data_file_descriptor import AccessType, DataFileStorage
+import urllib.parse
 
 # -----------------------------------------------------------------------------
 # Requests are processed in separate thread
@@ -66,83 +67,109 @@ def drop_privileges(uid_name='nobody', gid_name='nogroup'):
 def exit_handler(signal, frame):
     sys.exit(0)
 
+class LdapUser:
+    def __init__(self, user):
+        # initialise LDAP and search the user
+        self.response = None
+        protocol = 'ldap://' if conf['ssl'] != 'on' else 'ldaps://'
+        self.ldap_connection = None
+        for host in conf['host'].split():
+            try:
+                self.ldap_connection = ldap.initialize(protocol + host)
+                ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_NEVER)
+                self.ldap_connection.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_ALLOW)
+                self.ldap_connection.set_option(ldap.OPT_REFERRALS, 0)  # MS AD
+                self.ldap_connection.set_option(ldap.OPT_NETWORK_TIMEOUT, 3)
+                self.ldap_connection.simple_bind_s(conf['binddn'], conf['bindpw'])
+                response = self.ldap_connection.search_s(base=conf['base'], scope=ldap.SCOPE_SUBTREE,
+                                                filterstr='(&(objectClass=person)(uid=' + user + '))')
+                self.user_dn = response[0][0] if len(response)>0 else None
+                self.user_attributes = response[0][1] if len(response)>0 else None
+            except (ldap.CONNECT_ERROR, ldap.SERVER_DOWN):
+                self.unbind()
+                # and try next server
 
-def check_auth(user, passwd, allowusr, allowgr):
-    """check password and group membership"""
-    proto = 'ldap://' if conf['ssl'] != 'on' else 'ldaps://'
-    ldap_connection = None
-    for host in conf['host'].split():
+    def check_authentication(self, password):
+        # check user password
         try:
-            ldap_connection = ldap.initialize(proto + host)
-            ldap.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_NEVER)
-            ldap_connection.set_option(ldap.OPT_X_TLS_REQUIRE_CERT, ldap.OPT_X_TLS_ALLOW)
-            ldap_connection.set_option(ldap.OPT_REFERRALS, 0)  # MS AD
-            ldap_connection.set_option(ldap.OPT_NETWORK_TIMEOUT, 3)
-            ldap_connection.simple_bind_s(conf['binddn'], conf['bindpw'])
-            data = ldap_connection.search_s(base=conf['base'], scope=ldap.SCOPE_SUBTREE,
-                                            filterstr='(&(objectClass=person)(uid=' + user + '))')
-            if data:
-                dn = data[0][0]
-                data = data[0][1]
-                # check password
-                try:
-                    ldap_connection.simple_bind_s(dn, passwd)
-                except ldap.INVALID_CREDENTIALS:
-                    return False
-                #check if public (allowed to all authenticated users)
-                if allowgr == '_public':
-                    return True
-                # check allowed users
-                if bool(allowusr) and str(data['uniqueIdentifier'][0], 'utf-8') in [x.strip() for x in allowusr.split(',')]:
-                    return True
-                # check allowed groups
-                if bool(allowgr):
-                    groups_set = set([str(d, 'utf-8') for d in data['memberOf']])
-                    allowgr_set = set([x.strip() for x in allowgr.split(',')])
-                    if bool(groups_set & allowgr_set):
-                        return True
-                # user found but not in allowed
-                return False
-        except (ldap.CONNECT_ERROR, ldap.SERVER_DOWN):
-            pass  # try next server
+            authenticate = False
+            #next op generates ldap.INVALID_CREDENTIALS exception if auth failed
+            if self.user_dn is not None :
+                self.ldap_connection.simple_bind_s(self.user_dn, password)
+                authenticate = True
+        except ldap.INVALID_CREDENTIALS:
+            authenticate = False
         finally:
-            if ldap_connection:
-                ldap_connection.unbind()
-    return False
+            return authenticate
+
+    def unbind(self):
+        if self.ldap_connection is not None:
+            self.ldap_connection.unbind()
+            self.ldap_connection = None
+        self.response = None
+
+    def check_autorisation(self, allowed_users, allowed_groups):
+        if allowed_users is not None and self.user_attributes is not None :
+            # case user in allowed_users
+            user_id = str(self.user_attributes['uniqueIdentifier'][0], 'utf-8')
+            if user_id in allowed_users :
+                return True
+        if allowed_groups is not None and self.user_attributes is not None :
+            # case user has groups in common with the file
+            user_groups = set([str(d, 'utf-8') for d in self.user_attributes['memberOf']])
+            if len(user_groups & allowed_groups) > 0 :
+                return True
+        return False
 
 
 class LDAPAuthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            allowusr = self.headers.get('X-Ldap-Allowed-Usr')
-            allowgr = self.headers.get('X-Ldap-Allowed-Grp')
+            ldap_user = None
+            allowed_users = set()
+            allowed_groups = set()
             auth_header = self.headers.get('Authorization')
             document_uri = self.headers.get('X-Ldap-Document-Uri')
-            file_path = ''
-            document_mode = False
-            if document_uri in files_descriptor.storage:
-                document_mode = True
-                file_path = files_descriptor.get(document_uri).file_path
-                allowusr = ','.join(files_descriptor.get(document_uri).allowed_users)
-                allowgr = ','.join(files_descriptor.get(document_uri).allowed_groups)
-                if files_descriptor.get(document_uri).access_type == AccessType.free:
-                    allowusr = '_anybody'
-                if files_descriptor.get(document_uri).access_type == AccessType.public:
-                    allowusr = ''
-                    allowgr = '_public'
-                
-            if allowusr == '_anybody':
+            file_path = None
+            document_uri_decoded = urllib.parse.unquote(document_uri)
+            document_found = document_uri_decoded in files_descriptor.storage
+            document_is_free_access = False
+            document_is_public = False
+            user = None
+
+            if document_found:
+                #initialise with metadata from myepfl
+                file_path = files_descriptor.get(document_uri_decoded).file_path
+                allowed_users = set((files_descriptor.get(document_uri_decoded).allowed_users))
+                allowed_groups = set((files_descriptor.get(document_uri_decoded).allowed_groups))
+                document_is_free_access = files_descriptor.get(document_uri_decoded).access_type == AccessType.free
+                document_is_public = files_descriptor.get(document_uri_decoded).access_type == AccessType.public
+
+            if document_is_free_access:
+                #case document access need no authentication
                 self.send_response(200)
-                if document_mode :
-                    self.send_header('X-File-Path', file_path)
+                self.send_header('X-File-Path', file_path)
                 return
+            #case document access need authentication, extract user, password from header
             if auth_header and auth_header.lower().startswith('basic '):
-                user, passwd = str(base64.b64decode(auth_header[6:]), 'utf-8').split(':', 1)
-                if check_auth(user, passwd, allowusr, allowgr):
-                    self.send_response(200)
-                    if document_mode:
-                        self.send_header('X-File-Path', file_path)
+                user, password = str(base64.b64decode(auth_header[6:]), 'utf-8').split(':', 1)
+            if user is not None :
+                ldap_user = LdapUser(user)
+                if ldap_user.check_authentication(password):
+                    if document_found:
+                        if document_is_public or ldap_user.check_autorisation(allowed_users, allowed_groups):
+                            self.send_response(200)
+                            self.send_header('X-File-Path', file_path)
+                            return
+                        #user has no access to document
+                        self.send_response(403)
+                        return
+                    #the document doesn't exist
+                    self.send_response(404)
                     return
+                #user failed to authenticate
+                self.send_response(401)
+                return
             self.send_response(401)
             realm = self.headers.get('X-Ldap-Realm')
             if not realm:
@@ -155,6 +182,8 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
             print(sys.exc_info(), file=errorlog)
             errorlog.flush()
         finally:
+            if ldap_user is not None:
+                ldap_user.unbind()
             self.end_headers()
 
 
