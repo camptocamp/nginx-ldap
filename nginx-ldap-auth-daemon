@@ -175,7 +175,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
             self.send_response(401)
             realm = self.headers.get('X-Ldap-Realm')
             if not realm:
-                realm = 'Authorization required'
+                realm = 'Authentication required'
             self.send_header('WWW-Authenticate', 'Basic realm="{}"'.format(realm))
             self.send_header('Cache-Control', 'no-cache')
         except:
