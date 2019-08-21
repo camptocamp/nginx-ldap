@@ -70,7 +70,7 @@ def exit_handler(signal, frame):
     sys.exit(0)
 
 class Log:
-    def __init__(self, info = None, priority='INFO', verb='GET', code='200', username = None, uri = None, path = None):
+    def __init__(self, info = None, priority='INFO', verb=None, code=None, username = None, uri = None, path = None):
         self.priority = priority
         self.timegenerated = str(datetime.now())
         self.verb = verb
@@ -184,7 +184,10 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                 return
             #case document access need authentication, extract user, password from header
             if auth_header and auth_header.lower().startswith('basic '):
-                user, password = str(base64.b64decode(auth_header[6:]), 'utf-8').split(':', 1)
+                try :
+                    user, password = str(base64.b64decode(auth_header[6:]), 'utf-8').split(':', 1)
+                except :
+                    user = None
             if user is not None :
                 ldap_user = LdapUser(user)
                 if ldap_user.check_authentication(password):
@@ -216,12 +219,12 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
             http_code = 500
             self.send_response(http_code)
             self.send_header('X-Error-Message', sys.exc_info()[1])
-            log_info = sys.exc_info()
+            log_info = str(sys.exc_info()[0])
         finally:
             if ldap_user is not None:
                 ldap_user.unbind()
             self.end_headers()
-            Log(log_info, code=http_code, username=user, uri=document_uri, path=file_path)
+            Log(log_info, verb="GET", code=http_code, username=user, uri=document_uri, path=file_path)
 
 
 if __name__ == '__main__':
@@ -243,4 +246,4 @@ if __name__ == '__main__':
         server = AuthHTTPServer((args.host, args.port), LDAPAuthHandler)
         server.serve_forever()
     except:
-        Log(sys.exc_info())
+        Log(str(sys.exc_info()[0]))
