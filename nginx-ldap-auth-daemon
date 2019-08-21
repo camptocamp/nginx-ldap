@@ -10,6 +10,8 @@ import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from data_file_descriptor import AccessType, DataFileStorage
 import urllib.parse
+from datetime import datetime
+import json
 
 # -----------------------------------------------------------------------------
 # Requests are processed in separate thread
@@ -45,7 +47,7 @@ def read_conf(fname):
                 if len(data) > 1 and data[0] in opts:
                     conf[data[0]] = ' '.join(data[1:])
     except:
-        print("Unable to read {} as uid {}: {}".format(fname, os.getuid(), sys.exc_info()))
+        print("Unable to read {} as uid {}: {}".format(fname, os.getuid()))
         sys.exit(1)
 
     for o in opts[:4]:
@@ -66,6 +68,33 @@ def drop_privileges(uid_name='nobody', gid_name='nogroup'):
 
 def exit_handler(signal, frame):
     sys.exit(0)
+
+class Log:
+    def __init__(self, info = None, priority='INFO', verb='GET', code='200', username = None, uri = None, path = None):
+        self.priority = priority
+        self.timegenerated = str(datetime.now())
+        self.verb = verb
+        self.code = code
+        self.username = username
+        self.uri = uri
+        self.path = path
+        self.info = info
+        self.print()
+
+    def print(self):
+        data = {
+            "timegenerated" : self.timegenerated,
+            "priority" : self.priority,
+            "verb" : self.verb,
+            "code" : self.code,
+            "username" : self.username,
+            "uri" : self.uri,
+            "path" : self.path,
+            "info" : self.info
+        }
+        print(json.dumps(data))
+
+
 
 class LdapUser:
     def __init__(self, user):
@@ -136,6 +165,8 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
             document_is_free_access = False
             document_is_public = False
             user = None
+            http_code = None
+            log_info = None
 
             if document_found:
                 #initialise with metadata from myepfl
@@ -147,7 +178,8 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
 
             if document_is_free_access:
                 #case document access need no authentication
-                self.send_response(200)
+                http_code = 200
+                self.send_response(http_code)
                 self.send_header('X-File-Path', file_path)
                 return
             #case document access need authentication, extract user, password from header
@@ -158,35 +190,38 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                 if ldap_user.check_authentication(password):
                     if document_found:
                         if document_is_public or ldap_user.check_autorisation(allowed_users, allowed_groups):
-                            self.send_response(200)
+                            http_code = 200
+                            self.send_response(http_code)
                             self.send_header('X-File-Path', file_path)
                             return
                         #user has no access to document
-                        self.send_response(403)
+                        http_code = 403
+                        self.send_response(http_code)
                         return
                     #the document doesn't exist, but nginx auth module doesn't support it ...
                     #so return 200, and an empty path
-                    self.send_response(200)
+                    http_code = 200
+                    self.send_response(http_code)
                     self.send_header('X-File-Path', "")
                     return
-                #user failed to authenticate
-                self.send_response(401)
-                return
-            self.send_response(401)
+            #user failed to authenticate
+            http_code = 401
+            self.send_response(http_code)
             realm = self.headers.get('X-Ldap-Realm')
             if not realm:
                 realm = 'Authentication required'
             self.send_header('WWW-Authenticate', 'Basic realm="{}"'.format(realm))
             self.send_header('Cache-Control', 'no-cache')
         except:
-            self.send_response(500)
+            http_code = 500
+            self.send_response(http_code)
             self.send_header('X-Error-Message', sys.exc_info()[1])
-            print(sys.exc_info(), file=errorlog)
-            errorlog.flush()
+            log_info = sys.exc_info()
         finally:
             if ldap_user is not None:
                 ldap_user.unbind()
             self.end_headers()
+            Log(log_info, code=http_code, username=user, uri=document_uri, path=file_path)
 
 
 if __name__ == '__main__':
@@ -201,8 +236,6 @@ if __name__ == '__main__':
     drop_privileges()
     signal.signal(signal.SIGINT, exit_handler)
 
-    errorlog = open(conf['logdir']+'nginx-ldap-auth.log', 'w', 1)
-
     try :
         files_descriptor = DataFileStorage()
         files_descriptor.load(conf['filedescrpth'])
@@ -210,5 +243,4 @@ if __name__ == '__main__':
         server = AuthHTTPServer((args.host, args.port), LDAPAuthHandler)
         server.serve_forever()
     except:
-        print(sys.exc_info(), file=errorlog)
-        errorlog.flush()
+        Log(sys.exc_info())
