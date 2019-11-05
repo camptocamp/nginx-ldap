@@ -35,7 +35,7 @@ class AuthHTTPServer(ThreadingMixIn, HTTPServer):
 # -----------------------------------------------------------------------------
 conf = {}
 
-mem_debug = True
+mem_debug = False
 
 def read_conf(fname):
     """read file in pam_ldap format"""
