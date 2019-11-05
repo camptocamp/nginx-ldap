@@ -174,6 +174,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
             if document_found:
                 #initialise with metadata from myepfl
                 file_path = files_descriptor.get(document_uri).file_path
+                mime_type = files_descriptor.get(document_uri).mime_type
                 allowed_users = set((files_descriptor.get(document_uri).allowed_users))
                 allowed_groups = set((files_descriptor.get(document_uri).allowed_groups))
                 document_is_free_access = files_descriptor.get(document_uri).access_type == AccessType.free
@@ -184,6 +185,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                 http_code = 200
                 self.send_response(http_code)
                 self.send_header('X-File-Path', file_path)
+                self.send_header('X-Mime-Type', mime_type)
                 return
             #case document access need authentication, extract user, password from header
             if auth_header and auth_header.lower().startswith('basic '):
@@ -199,6 +201,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                             http_code = 200
                             self.send_response(http_code)
                             self.send_header('X-File-Path', file_path)
+                            self.send_header('X-Mime-Type', mime_type)
                             return
                         #user has no access to document
                         http_code = 403
@@ -209,6 +212,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                     http_code = 200
                     self.send_response(http_code)
                     self.send_header('X-File-Path', "")
+                    self.send_header('X-Mime-Type', "application/octet-stream")
                     return
             #user failed to authenticate
             http_code = 401

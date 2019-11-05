@@ -13,6 +13,7 @@ class DataFileDescriptor():
         self.allowed_users = set()
         self.allowed_groups = set()
         self.access_type = AccessType.private
+        self.mime_type = None
 
     def add_user(self, user):
         if user is not None :
@@ -24,6 +25,9 @@ class DataFileDescriptor():
 
     def set_access_type(self, access_type):
         self.access_type = access_type
+
+    def add_mime_type(self, mime_type):
+        self.mime_type = mime_type
 
     def __str__(self):
         return "%pth->"+self.file_path+"%grps->"+str(self.allowed_groups)+"%usrs->"+str(self.allowed_users)+"%acct->"+str(self.access_type)+"\n"
