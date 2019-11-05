@@ -9,7 +9,7 @@ import ldap
 import argparse
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from data_file_descriptor import AccessType, DataFileStorage
-import urllib.parse
+from urllib.parse import unquote
 from datetime import datetime
 import json
 import tracemalloc
@@ -163,7 +163,7 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
             auth_header = self.headers.get('Authorization')
             document_uri_header = self.headers.get('X-Ldap-Document-Uri')
             file_path = None
-            document_uri = str(document_uri_header, 'utf-8')
+            document_uri = unquote(document_uri_header)
             document_found = document_uri in files_descriptor.storage
             document_is_free_access = False
             document_is_public = False
