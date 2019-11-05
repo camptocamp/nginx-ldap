@@ -12,6 +12,7 @@ from data_file_descriptor import AccessType, DataFileStorage
 import urllib.parse
 from datetime import datetime
 import json
+import tracemalloc
 
 # -----------------------------------------------------------------------------
 # Requests are processed in separate thread
@@ -34,7 +35,7 @@ class AuthHTTPServer(ThreadingMixIn, HTTPServer):
 # -----------------------------------------------------------------------------
 conf = {}
 
-
+mem_debug = True
 
 def read_conf(fname):
     """read file in pam_ldap format"""
@@ -154,14 +155,16 @@ class LdapUser:
 class LDAPAuthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
+            if mem_debug :
+                tracemalloc.start()
             ldap_user = None
             allowed_users = set()
             allowed_groups = set()
             auth_header = self.headers.get('Authorization')
-            document_uri = self.headers.get('X-Ldap-Document-Uri')
+            document_uri_header = self.headers.get('X-Ldap-Document-Uri')
             file_path = None
-            document_uri_decoded = urllib.parse.unquote(document_uri)
-            document_found = document_uri_decoded in files_descriptor.storage
+            document_uri = str(document_uri_header, 'utf-8')
+            document_found = document_uri in files_descriptor.storage
             document_is_free_access = False
             document_is_public = False
             user = None
@@ -170,11 +173,11 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
 
             if document_found:
                 #initialise with metadata from myepfl
-                file_path = files_descriptor.get(document_uri_decoded).file_path
-                allowed_users = set((files_descriptor.get(document_uri_decoded).allowed_users))
-                allowed_groups = set((files_descriptor.get(document_uri_decoded).allowed_groups))
-                document_is_free_access = files_descriptor.get(document_uri_decoded).access_type == AccessType.free
-                document_is_public = files_descriptor.get(document_uri_decoded).access_type == AccessType.public
+                file_path = files_descriptor.get(document_uri).file_path
+                allowed_users = set((files_descriptor.get(document_uri).allowed_users))
+                allowed_groups = set((files_descriptor.get(document_uri).allowed_groups))
+                document_is_free_access = files_descriptor.get(document_uri).access_type == AccessType.free
+                document_is_public = files_descriptor.get(document_uri).access_type == AccessType.public
 
             if document_is_free_access:
                 #case document access need no authentication
@@ -224,7 +227,16 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
             if ldap_user is not None:
                 ldap_user.unbind()
             self.end_headers()
-            Log(log_info, verb="GET", code=http_code, username=user, uri=document_uri, path=file_path)
+            Log(log_info, verb="GET", code=http_code, username=user, uri=document_uri_header, path=file_path)
+            snapshot = tracemalloc.take_snapshot()
+            if mem_debug:
+                mem_stats.append(snapshot)
+                if len(mem_stats) > 1 :
+                    top_stats = mem_stats[-1].compare_to(mem_stats[-2], 'lineno')
+
+                    print("[ Top 10 ]")
+                    for stat in top_stats[:10]:
+                        print(stat)
 
 
 if __name__ == '__main__':
@@ -244,6 +256,8 @@ if __name__ == '__main__':
         files_descriptor.load(conf['filedescrpth'])
 
         server = AuthHTTPServer((args.host, args.port), LDAPAuthHandler)
+        if mem_debug:
+            mem_stats = []
         server.serve_forever()
     except:
         Log(str(sys.exc_info()[0]))
