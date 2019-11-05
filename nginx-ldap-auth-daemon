@@ -12,7 +12,6 @@ from data_file_descriptor import AccessType, DataFileStorage
 from urllib.parse import unquote
 from datetime import datetime
 import json
-import tracemalloc
 
 # -----------------------------------------------------------------------------
 # Requests are processed in separate thread
@@ -228,7 +227,6 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
                 ldap_user.unbind()
             self.end_headers()
             Log(log_info, verb="GET", code=http_code, username=user, uri=document_uri_header, path=file_path)
-            snapshot = tracemalloc.take_snapshot()
 
 
 if __name__ == '__main__':
