@@ -35,8 +35,6 @@ class AuthHTTPServer(ThreadingMixIn, HTTPServer):
 # -----------------------------------------------------------------------------
 conf = {}
 
-mem_debug = False
-
 def read_conf(fname):
     """read file in pam_ldap format"""
     global conf
@@ -155,8 +153,6 @@ class LdapUser:
 class LDAPAuthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            if mem_debug :
-                tracemalloc.start()
             ldap_user = None
             allowed_users = set()
             allowed_groups = set()
@@ -233,14 +229,6 @@ class LDAPAuthHandler(BaseHTTPRequestHandler):
             self.end_headers()
             Log(log_info, verb="GET", code=http_code, username=user, uri=document_uri_header, path=file_path)
             snapshot = tracemalloc.take_snapshot()
-            if mem_debug:
-                mem_stats.append(snapshot)
-                if len(mem_stats) > 1 :
-                    top_stats = mem_stats[-1].compare_to(mem_stats[-2], 'lineno')
-
-                    print("[ Top 10 ]")
-                    for stat in top_stats[:10]:
-                        print(stat)
 
 
 if __name__ == '__main__':
